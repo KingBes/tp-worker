@@ -78,6 +78,19 @@ http://127.0.0.1:8080
 
 开启后修改 `include` 目录内的 PHP 文件会自动重载（增删改均触发）。
 
+### 数据库连接保活
+
+常驻 worker 会长期复用 PDO 连接，空闲超过 MySQL `wait_timeout` 后连接被服务端断开，下个请求会报 `2006 MySQL server has gone away`（FPM 每请求新建连接无此问题）。在 `config/worker.php` 中配置：
+
+```php
+//数据库心跳（秒），需小于 MySQL wait_timeout，0 关闭
+'db_heartbeat' => 55,
+```
+
+开启后每个 worker 进程定时对默认数据库连接 `SELECT 1` 保活。
+
+> 建议同时在应用的 `config/database.php` 连接配置中开启 `'break_reconnect' => true`：心跳只能防 `wait_timeout` 这一种断连，网络闪断、MySQL 重启等场景由 think-orm 断线重连兜底（同请求自动重连并重试当前查询）。两者配合才完整。
+
 ### 队列支持
 
 使用方法见 [think-queue](https://github.com/top-think/think-queue)
