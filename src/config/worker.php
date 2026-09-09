@@ -30,6 +30,11 @@ return [
         'enable'  => false,
         'workers' => [],
     ],
+    //数据库心跳（秒）：常驻进程长期复用 PDO 连接，空闲超过 MySQL wait_timeout 后
+    //连接被服务端断开，下个请求报 2006 server has gone away。设为正数时定时对
+    //默认数据库连接 SELECT 1 保活（需小于 wait_timeout），0 关闭。断线重连由
+    //think-orm 的 break_reconnect 兜底（建议在数据库连接配置中开启）。
+    'db_heartbeat' => 0,
     //进程间通信
     'conduit'    => [
         'enable' => true,

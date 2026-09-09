@@ -14,14 +14,14 @@ jobs:
       matrix:
         os: [ ubuntu-latest, windows-latest, macos-latest ]
         php: [ "8.2", "8.3", "8.4", "8.5" ]
-        # Windows 无 posix/pcntl 扩展，Unix 平台按需开启
+        # Windows 无 posix/pcntl 扩展，Unix 平台按需开启；pdo_sqlite 供 db 心跳测试用
         include:
           - os: windows-latest
-            extensions: "json"
+            extensions: "json, pdo_sqlite"
           - os: ubuntu-latest
-            extensions: "json, posix, pcntl"
+            extensions: "json, posix, pcntl, pdo_sqlite"
           - os: macos-latest
-            extensions: "json, posix, pcntl"
+            extensions: "json, posix, pcntl, pdo_sqlite"
 
     name: PHP ${{ matrix.php }} - ${{ matrix.os }}
 

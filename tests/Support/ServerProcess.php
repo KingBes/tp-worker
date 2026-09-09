@@ -86,16 +86,18 @@ class ServerProcess
      *
      * Windows 下 proc_terminate 只杀掉直接子进程，Workerman 的 master 与各
      * worker 会残留并继续占用端口，导致后续测试文件起不来。
-     * 用 taskkill /T 按进程树终止。
+     * 用 taskkill /T 按进程树终止。注意：master 可能已先退出而 worker 子进程
+     * 存活（孤儿占用端口毒化后续测试），因此即使 master 已不在也要尝试按树
+     * 清理；taskkill 的失败输出必须可见，不得静默吞掉。
      */
     public function stop(): void
     {
-        if (!$this->process->isRunning()) {
-            return;
-        }
-
         if (DIRECTORY_SEPARATOR === '\\') {
-            exec(sprintf('taskkill /F /T /PID %d 2>nul', $this->process->getPid()));
+            $pid = $this->process->getPid();
+
+            if ($pid) {
+                exec(sprintf('taskkill /F /T /PID %d', $pid), $out, $code);
+            }
         }
 
         $this->process->stop();

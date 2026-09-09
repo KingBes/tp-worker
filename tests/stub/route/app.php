@@ -54,6 +54,17 @@ Route::get('queue', function () {
     return json_encode($data);
 });
 
+// 数据库连接验证：SELECT 1 走默认连接（sqlite），配合 db_heartbeat 覆盖保活路径
+Route::get('db', function () {
+    $connection = \think\facade\Db::connect();
+
+    $rows = $connection instanceof \think\db\PDOConnection
+        ? $connection->query('SELECT 1 AS one')
+        : [];
+
+    return json_encode(['one' => $rows[0]['one'] ?? null]);
+});
+
 Route::get('static/:path', function (string $path) {
     $filename = public_path() . $path;
     return new \think\worker\response\File($filename);

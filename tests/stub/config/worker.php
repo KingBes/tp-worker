@@ -32,6 +32,8 @@ return [
             'default' => [],
         ],
     ],
+    //数据库心跳（秒），测试默认开启用于覆盖保活路径
+    'db_heartbeat' => env('DB_HEARTBEAT', 1),
     //共享数据
     'conduit'    => [
         'type' => 'socket',

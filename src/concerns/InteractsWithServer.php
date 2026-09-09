@@ -4,6 +4,8 @@ namespace think\worker\concerns;
 
 use RuntimeException;
 use think\App;
+use think\db\PDOConnection;
+use think\facade\Db;
 use think\worker\Ipc;
 use think\worker\Watcher;
 use think\worker\Worker;
@@ -39,6 +41,10 @@ trait InteractsWithServer
             $this->workerId = $this->ipc->listenMessage();
 
             $this->triggerEvent('workerStart', $worker);
+
+            // 数据库连接心跳：常驻进程复用 PDO 连接，防止空闲超过 MySQL wait_timeout
+            // 后连接被服务端断开，下个请求报 2006 server has gone away
+            $this->registerDbHeartbeat();
 
             // Windows 下热更新：reloadable worker 轮询重载标记，命中则退出交由 master 重启
             if (DIRECTORY_SEPARATOR !== '/' && $this->getConfig('hot_update.enable', false)) {
@@ -98,6 +104,41 @@ trait InteractsWithServer
         if ($this->getConfig('conduit.enable', true) && Worker::$eventLoopClass === null) {
             Worker::$eventLoopClass = FiberEventLoop::class;
         }
+    }
+
+    /**
+     * 注册数据库连接心跳（常驻进程保活）。
+     *
+     * 常驻 worker 长期复用 PDO 连接，空闲超过 MySQL wait_timeout 后连接被服务端
+     * 断开，下个请求报 2006 MySQL server has gone away（FPM 每请求新建连接无此问题）。
+     * worker.db_heartbeat > 0 时定时对默认数据库连接 SELECT 1 保活，需小于 wait_timeout；
+     * 网络闪断等失效场景由 think-orm 的 break_reconnect 断线重连兜底。心跳自身异常
+     * 静默吞掉，避免定时器异常拖垮常驻进程。
+     */
+    protected function registerDbHeartbeat(): void
+    {
+        $interval = (int) $this->getConfig('db_heartbeat', 0);
+
+        if ($interval <= 0) {
+            return;
+        }
+
+        Timer::add($interval, function (): void {
+            try {
+                $connection = Db::connect();
+
+                // 非默认 PDO 连接器（自定义 ConnectionInterface 实现）时不做保活
+                if (!$connection instanceof PDOConnection) {
+                    return;
+                }
+
+                // 直接在缓存的 PDO 句柄上执行，重置 MySQL wait_timeout 计时；
+                // 连接已失效时由 think-orm break_reconnect 断线重连并重试
+                $connection->query('SELECT 1');
+            } catch (\Throwable) {
+                // 心跳失败不打断常驻进程，由 break_reconnect / 下次请求恢复
+            }
+        });
     }
 
     /**
