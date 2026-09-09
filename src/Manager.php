@@ -62,6 +62,8 @@ class Manager
      */
     public function prepareWorker(string $type): void
     {
+        $this->ensureFiberEventLoop();
+
         $this->prepareIpc();
 
         if ($type !== 'conduit') {

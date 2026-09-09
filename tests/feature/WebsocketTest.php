@@ -2,31 +2,23 @@
 
 use GuzzleHttp\Client;
 use React\EventLoop\Loop;
-use Symfony\Component\Process\Process;
+use Tests\Support\ServerProcess;
 use function Ratchet\Client\connect;
 
-$process = null;
-beforeAll(function () use (&$process) {
-    $process = new Process(['php', 'think', 'worker'], STUB_DIR, [
+$server = null;
+beforeAll(function () use (&$server) {
+    $server = new ServerProcess([
         'PHP_WEBSOCKET_ENABLE' => 'true',
         'PHP_QUEUE_ENABLE'     => 'false',
         'PHP_HOT_ENABLE'       => 'false',
     ]);
-    $process->start();
-    $wait = 0;
 
-    while (!$process->getOutput()) {
-        $wait++;
-        if ($wait > 30) {
-            throw new Exception('server start failed');
-        }
-        sleep(1);
-    }
+    $server->start();
 });
 
-afterAll(function () use (&$process) {
-    echo $process->getOutput();
-    $process->stop();
+afterAll(function () use (&$server) {
+    echo $server->output();
+    $server->stop();
 });
 
 beforeEach(function () {
@@ -50,6 +42,13 @@ it('http', function () {
 it('websocket', function () {
     $connected = 0;
     $messages  = [];
+
+    // 兜底定时器：连接失败时 reject 的 promise 不会终止事件循环，
+    // 没有它整个测试会挂住直到 CI 超时，而不是快速失败
+    Loop::get()->addTimer(15, function () {
+        Loop::get()->stop();
+    });
+
     connect('ws://127.0.0.1:8080/websocket')
         ->then(function (\Ratchet\Client\WebSocket $conn) use (&$connected, &$messages) {
             $connected++;

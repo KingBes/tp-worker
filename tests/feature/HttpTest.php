@@ -2,29 +2,21 @@
 
 use GuzzleHttp\Client;
 use GuzzleHttp\Cookie\CookieJar;
-use Symfony\Component\Process\Process;
+use Tests\Support\ServerProcess;
 
-$process = null;
-beforeAll(function () use (&$process) {
-    $process = new Process(['php', 'think', 'worker'], STUB_DIR, [
+$server = null;
+beforeAll(function () use (&$server) {
+    $server = new ServerProcess([
         'PHP_WEBSOCKET_ENABLE' => 'false',
         'PHP_QUEUE_ENABLE'     => 'false',
     ]);
-    $process->start();
-    $wait = 0;
 
-    while (!$process->getOutput()) {
-        $wait++;
-        if ($wait > 30) {
-            throw new Exception('server start failed');
-        }
-        sleep(1);
-    }
+    $server->start();
 });
 
-afterAll(function () use (&$process) {
-    echo $process->getOutput();
-    $process->stop();
+afterAll(function () use (&$server) {
+    echo $server->output();
+    $server->stop();
 });
 
 beforeEach(function () {

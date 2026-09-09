@@ -26,30 +26,15 @@ class Find implements Driver
 
         $dest = implode(' ', $this->directory);
 
-        $name    = empty($this->name) ? '' : ' \( ' . join(' -o ', array_map(fn($v) => "-name \"{$v}\"", $this->name)) . ' \)';
-        $notName = '';
-        $notPath = '';
-        if (!empty($this->exclude)) {
-            $excludeDirs = $excludeFiles = [];
-            foreach ($this->exclude as $directory) {
-                $directory = rtrim($directory, '/');
-                if (is_dir($directory)) {
-                    $excludeDirs[] = $directory;
-                } else {
-                    $excludeFiles[] = $directory;
-                }
-            }
+        $name = empty($this->name) ? '' : ' \( ' . join(' -o ', array_map(fn($v) => "-name \"{$v}\"", $this->name)) . ' \)';
 
-            if (!empty($excludeFiles)) {
-                $notPath = ' -not \( ' . join(' -and ', array_map(fn($v) => "-name \"{$v}\"", $excludeFiles)) . ' \)';
-            }
-
-            if (!empty($excludeDirs)) {
-                $notPath = ' -not \( ' . join(' -and ', array_map(fn($v) => "-path \"{$v}/*\"", $excludeDirs)) . ' \)';
-            }
-        }
-
-        $command = "find {$dest}{$name}{$notName}{$notPath} -mmin {$minutes} -type f -print";
+        $command = sprintf(
+            'find %s%s%s -mmin %s -type f -print',
+            $dest,
+            $name,
+            $this->buildExcludeExpr(),
+            $minutes
+        );
 
         Timer::add($ms / 1000, function () use ($callback, $command) {
             $stdout = $this->exec($command);
@@ -57,6 +42,38 @@ class Find implements Driver
                 call_user_func($callback);
             }
         });
+    }
+
+    /**
+     * 构建排除表达式。
+     *
+     * 文件按基名匹配（-name），目录按前缀匹配（-path）。
+     * 多个条件必须用 -o 连接：用 -and 的话「排除 A 和 B」会退化成
+     * 「排除同时是 A 且是 B 的文件」，即恒真条件，排除完全失效。
+     *
+     * @return string 空字符串表示无排除项
+     */
+    protected function buildExcludeExpr(): string
+    {
+        $exprs = [];
+
+        foreach ((array) $this->exclude as $path) {
+            $path = rtrim((string) $path, '/');
+
+            if ($path === '') {
+                continue;
+            }
+
+            $exprs[] = is_dir($path)
+                ? sprintf('-path "%s/*"', $path)
+                : sprintf('-name "%s"', $path);
+        }
+
+        if (empty($exprs)) {
+            return '';
+        }
+
+        return ' -not \( ' . join(' -o ', $exprs) . ' \)';
     }
 
     public function exec($command)

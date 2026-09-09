@@ -40,12 +40,17 @@
         "guzzlehttp/guzzle": "^7.0",
         "topthink/think-queue": "^3.0",
         "phpstan/phpstan": "^2.0",
-        "ratchet/pawl": "^0.4.1"
+        "ratchet/pawl": "^0.4.1",
+        "symfony/process": "^7.0 || ^8.0"
     },
     "autoload-dev": {
         "psr-4": {
             "app\\": "tests/stub/app"
-        }
+        },
+        "classmap": [
+            "tests/Support/",
+            "tests/stub/queue/"
+        ]
     },
     "config": {
         "allow-plugins": {

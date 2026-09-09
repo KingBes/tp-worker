@@ -7,13 +7,21 @@ on:
   pull_request:
 
 jobs:
-  linux_tests:
+  tests:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-latest ]
-        php: [ "8.2", "8.3", "8.4" ]
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+        php: [ "8.2", "8.3", "8.4", "8.5" ]
+        # Windows 无 posix/pcntl 扩展，Unix 平台按需开启
+        include:
+          - os: windows-latest
+            extensions: "json"
+          - os: ubuntu-latest
+            extensions: "json, posix, pcntl"
+          - os: macos-latest
+            extensions: "json, posix, pcntl"
 
     name: PHP ${{ matrix.php }} - ${{ matrix.os }}
 
@@ -25,7 +33,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: json, posix, pcntl
+          extensions: ${{ matrix.extensions }}
           ini-values: error_reporting=E_ALL
           tools: composer:v2
           coverage: xdebug

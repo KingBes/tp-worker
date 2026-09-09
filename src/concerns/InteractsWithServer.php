@@ -7,6 +7,7 @@ use think\App;
 use think\worker\Ipc;
 use think\worker\Watcher;
 use think\worker\Worker;
+use Workerman\Events\Fiber as FiberEventLoop;
 use Workerman\Redis\Client;
 use Workerman\Timer;
 
@@ -75,10 +76,27 @@ trait InteractsWithServer
      */
     public function start(string $command = 'start'): void
     {
+        $this->ensureFiberEventLoop();
+
         if (DIRECTORY_SEPARATOR === '/') {
             $this->startLinux($command);
         } else {
             $this->startWindows($command);
+        }
+    }
+
+    /**
+     * conduit / IPC 与 WebSocket 房间依赖协程化的 Fiber 事件循环。
+     *
+     * 默认 Select 事件循环下 connection 的 onMessage 不被包进 Fiber 上下文，
+     * 而 conduit 的 sendAndRecv（如读取房间成员）需要 Fiber::suspend/resume，
+     * 缺失时会抛「conduit must be used inside a coroutine/fiber」。
+     * 这里在事件循环创建前切换到 Workerman 的 Fiber 循环（所有回调均跑在协程内）。
+     */
+    protected function ensureFiberEventLoop(): void
+    {
+        if ($this->getConfig('conduit.enable', true) && Worker::$eventLoopClass === null) {
+            Worker::$eventLoopClass = FiberEventLoop::class;
         }
     }
 
@@ -198,11 +216,25 @@ trait InteractsWithServer
         return (int) file_get_contents($file);
     }
 
+    /**
+     * 当前 PHP 可执行文件在任务管理器中的映像名。
+     *
+     * 不能硬编码 php.exe：以 php-cgi.exe、php8.exe 等命名的二进制运行时会被漏判。
+     */
+    protected function winPhpImageName(): string
+    {
+        $name = strtolower(basename((string) PHP_BINARY));
+
+        return $name === '' ? 'php.exe' : $name;
+    }
+
     protected function isWinPhpProcessAlive(int $pid): bool
     {
-        exec(sprintf('tasklist /FI "PID eq %d" /FI "IMAGENAME eq php.exe" 2>nul', $pid), $output);
+        $image = $this->winPhpImageName();
 
-        return stripos(implode("\n", $output), 'php.exe') !== false;
+        exec(sprintf('tasklist /FI "PID eq %d" /FI "IMAGENAME eq %s" 2>nul', $pid, $image), $output);
+
+        return stripos(implode("\n", $output), $image) !== false;
     }
 
     protected function createWindowsStartFiles(string $masterToken): array
@@ -382,23 +414,40 @@ PHP;
     }
 
     /**
+     * 当前进程的 master token，由生成的启动文件 define。
+     * 直接运行启动文件（无 master）时为 null。
+     *
+     * 统一走 defined()/constant() 而非裸引用常量：常量是运行期定义的，
+     * 裸引用会让静态分析依赖 phpstan.neon 的 dynamicConstantNames 配置，
+     * 配置缺失或常量改名时就会报 constant.notFound。
+     */
+    protected function masterToken(): ?string
+    {
+        return defined('TP_WORKER_MASTER_TOKEN')
+            ? (string) constant('TP_WORKER_MASTER_TOKEN')
+            : null;
+    }
+
+    /**
      * Windows 下检测 master 存活：
      * 心跳文件不存在、token 不匹配（已被新 master 替换）或 mtime 超时（master 被强杀）时自动退出。
      */
     protected function watchMasterAlive()
     {
         // 直接运行生成的启动文件（无 master）时不检测
-        if (!defined('TP_WORKER_MASTER_TOKEN')) {
+        $token = $this->masterToken();
+
+        if ($token === null) {
             return;
         }
 
         $heartbeat = $this->winHeartbeatFile();
 
-        Timer::add(3, function () use ($heartbeat) {
+        Timer::add(3, function () use ($heartbeat, $token) {
             clearstatcache(true, $heartbeat);
 
             $alive = is_file($heartbeat)
-                && trim((string) file_get_contents($heartbeat)) === TP_WORKER_MASTER_TOKEN
+                && trim((string) file_get_contents($heartbeat)) === $token
                 && time() - (int) filemtime($heartbeat) < 15;
 
             if (!$alive) {
@@ -415,13 +464,24 @@ PHP;
      */
     protected function killWinMaster(): void
     {
+        $token = $this->masterToken();
+
+        if ($token === null) {
+            return;
+        }
+
         $pidFile = dirname($this->winHeartbeatFile()) . DIRECTORY_SEPARATOR
-            . 'master_' . TP_WORKER_MASTER_TOKEN . '.pid'; // @phpstan-ignore constant.notFound
+            . 'master_' . $token . '.pid';
 
         $pid = $this->readWinPidFile($pidFile);
 
         if ($pid > 0) {
-            exec(sprintf('taskkill /FI "IMAGENAME eq php.exe" /F /PID %d 2>nul', $pid));
+            // 带 IMAGENAME 过滤：PID 会被系统复用，不加过滤可能误杀同 PID 的其他进程
+            exec(sprintf(
+                'taskkill /FI "IMAGENAME eq %s" /F /PID %d 2>nul',
+                $this->winPhpImageName(),
+                $pid
+            ));
         }
 
         if (is_file($pidFile)) {

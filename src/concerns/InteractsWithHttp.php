@@ -636,9 +636,38 @@ PHP
 
         foreach ($cookie->getCookie() as $name => $val) {
             [$value, $expire, $option] = $val;
-            $wkResponse->cookie($name, $value, $expire, $option['path'], $option['domain'], (bool) $option['secure'], (bool) $option['httponly'], $option['samesite']);
+
+            $wkResponse->cookie(
+                $name,
+                $value,
+                $this->cookieMaxAge($expire),
+                $option['path'],
+                $option['domain'],
+                (bool) $option['secure'],
+                (bool) $option['httponly'],
+                $option['samesite']
+            );
         }
 
         return $wkResponse;
+    }
+
+    /**
+     * 把 ThinkPHP 的 cookie 过期时间转换成 Workerman 需要的 Max-Age。
+     *
+     * 两边语义不同：ThinkPHP 给的是绝对时间戳，0 表示会话 cookie（不下发 Max-Age）；
+     * Workerman 的 $maxAge 是相对秒数，且只有传 null 才会省略 Max-Age。
+     * 直接透传会把会话 cookie 写成 "Max-Age=0"，按 RFC 6265 这是「立即删除」，
+     * 浏览器与 Guzzle 都不会保存；非会话 cookie 则会得到一个巨大的秒数。
+     *
+     * @param int $expire 绝对过期时间戳，0 表示会话 cookie
+     */
+    protected function cookieMaxAge(int $expire): ?int
+    {
+        if ($expire <= 0) {
+            return null;
+        }
+
+        return max(0, $expire - time());
     }
 }

@@ -10,10 +10,18 @@
 // +----------------------------------------------------------------------
 
 return [
-    'default'     => 'redis',
+    // 测试默认走文件驱动：Redis/Database 都需要外部服务，
+    // 而 GitHub Actions 的 service 容器只在 Linux runner 上可用
+    'default'     => env('QUEUE_CONNECTION', 'file'),
     'connections' => [
         'sync'     => [
             'type' => 'sync',
+        ],
+        'file'     => [
+            'type'        => 'file',
+            'queue'       => 'default',
+            'path'        => runtime_path() . 'queue',
+            'retry_after' => 60,
         ],
         'database' => [
             'type'       => 'database',
