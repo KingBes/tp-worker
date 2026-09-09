@@ -438,6 +438,23 @@ PHP
         $server['SERVER_NAME']       = $wkRequest->host();
         $server['SERVER_PORT']       = $connection->getLocalPort();
 
+        // Windows 特有问题修复：tp-worker 在 Windows 下生成的 HTTP worker 入口为
+        // runtime/win/start_http.php，其 basename(start_http) 不在 ThinkPHP 多应用探测的
+        // 白名单(index/router/think)内，MultiApp::getScriptName() 会把它误当成应用名，
+        // 解析成 app\start_http\controller\Install 从而报 "controller not exists"。
+        // Linux 下入口是 think（在白名单内），因此无此问题。
+        // 关键：MultiApp 直接读全局 $_SERVER['SCRIPT_FILENAME']，仅设置请求 server 无效，必须改全局。
+        // 此处模拟 FPM 行为，将入口脚本指向 public/index.php，使 basename 命中白名单。
+        if (isset($this->app)) {
+            $publicIndex                = $this->app->getRootPath() . 'public' . DIRECTORY_SEPARATOR . 'index.php';
+            $_SERVER['SCRIPT_FILENAME'] = $publicIndex;
+            $_SERVER['SCRIPT_NAME']     = '/index.php';
+            $_SERVER['PHP_SELF']        = '/index.php';
+            $server['SCRIPT_FILENAME']  = $publicIndex;
+            $server['SCRIPT_NAME']      = '/index.php';
+            $server['PHP_SELF']         = '/index.php';
+        }
+
         return $server;
     }
 
