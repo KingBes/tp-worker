@@ -132,14 +132,24 @@ PHP;
 
     file_put_contents(STUB_DIR . '/route/hot.php', $route);
 
-    sleep(2);
+    // 热更新依赖监听目录变化 → SIGUSR1 重载 http worker → 重新注册路由。
+    // 整条链路（检测 + worker 重启 + 重新 bootstrap）在较慢的 CI runner（如 macOS）上
+    // 可能超过固定 sleep 的窗口，因此改为轮询直至就绪（最多 10s），避免时序脆弱导致误报。
+    $ready   = false;
+    $deadline = microtime(true) + 10;
 
-    $response = $this->httpClient->get('/hot');
+    while (microtime(true) < $deadline) {
+        $response = $this->httpClient->get('/hot');
 
-    expect($response->getStatusCode())
-        ->toBe(200)
-        ->and($response->getBody()->getContents())
-        ->toBe('hot');
+        if ($response->getStatusCode() === 200 && $response->getBody()->getContents() === 'hot') {
+            $ready = true;
+            break;
+        }
+
+        usleep(200000);
+    }
+
+    expect($ready)->toBeTrue();
 })->after(function () {
     @unlink(STUB_DIR . '/route/hot.php');
 })->skipOnWindows();
